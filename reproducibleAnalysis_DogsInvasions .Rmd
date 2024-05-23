@@ -1,0 +1,377 @@
+---
+title: _Dog invasions in Protected Areas, a case study using camera trapping, citizen science and artificial intelligence_
+author: |
+  <span style="font-family: 'Times New Roman', Times, serif;">
+  Santiago Gutiérrez-Zapata<sup>1*</sup>, Simone Santoro<sup>1</sup>, Manuel Emilio Gegúndez<sup>1</sup>, Nuria Selva<sup>2,3,4</sup>, Javier Calzada<sup>1,2</sup>
+  
+  <span style="font-family: 'Times New Roman', Times, serif;">
+  <sup>1</sup> Departamento de Ciencias Integradas, Facultad de Ciencias Experimentales, Universidad de Huelva, Huelva, Spain. <br>
+  <sup>2</sup> Centro de Estudios Avanzados en Física, Matemáticas y Computación, Facultad de Ciencias Experimentales, Universidad de Huelva, Huelva, Spain. <br>
+  <sup>3</sup> Institute of Nature Conservation, Polish Academy of Sciences, al. Adama Mickiewicza 33, 31-120 Kraków, Poland. <br>
+  <sup>4</sup> Estación Biológica de Doñana, Consejo Superior de Investigaciones Científicas, Sevilla, Spain.
+  
+  <span style="font-family: 'Times New Roman', Times, serif;">
+  *Corresponding Author: Santiago Gutierrez-Zapata (santiago.gutierrez@dci.uhu.es)
+  </span>
+date: "<span style='font-family: Times New Roman;'>2024-05-22</span>"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    collapsed: false
+    smooth_scroll: true
+    theme: journal
+    highlight: kate
+    df_print: paged
+    code_folding: hide
+---
+
+
+<style>
+  body {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 12pt;
+  }
+</style>
+
+
+## Required libraries
+```{r message=FALSE, warning=FALSE}
+library(DHARMa)
+library(effects)
+library(ggplot2)
+library(AICcmodavg)
+library(glmmTMB)
+library(dplyr)
+library(mgcv)
+library(mgcViz)
+library(DT)
+library(activity)
+library(kableExtra)
+```
+
+## General Dataset
+
+The dataset comprises records of dogs' events collected in Doñana National Park using camera traps deployed between October 2020 and January 2024. Additionally, sites where no dogs' events occurred are included for statistical analyses. The different columns are described as follows:
+
+- site: site ID.
+- camera: camera ID.
+- date_time: date and time of detections in dd/mm/yyyy H:M format
+- presence: locations with dogs' events (presence = "yes"), locations without dogs' envents (presence = "no")
+- count: number of dogs present in each event
+- collar: presence or absence of collars on the dogs
+- dist_urban: minimum distance in kilometers from the nearest village to each location
+- dist_mata: minimum distance in kilometers from each location to Matalascañas
+- dist_rocio: minimum distance in kilometers from each location to El Rocío
+- dist_road: minimum distance in kilometers from each location to the road
+- dist_marshes: minimum distance in kilometers from each location to the marshes
+- season: season of the year corresponding to each event
+- time_sunset: sunset time of each detection calculated for a specific site and time zone
+- time_sunrise: sunrise time of each detection calculated for a specific site and time zone
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, rows.print=20}
+# setwd("C:/Working directory") # set working directory
+
+# Loading data
+all_data <- read.csv("data_dogs.csv", header = TRUE, stringsAsFactors = TRUE)
+
+all_data
+```
+## Set of candidate models
+
+We utilised generalised linear models (GLMs) with a binomial family to assess whether the presence of dogs was influenced by the minimum distance of each camera site to the possible access points: 
+      
+      1) Minimum distance from Matalascañas (*dist_mata*) 
+      2) Minimum distance from the road (*dist_road*)
+      3) Minimum distance from El Rocío  (*dist_rocio*)
+      4) Minimum distance from the marshland (*dist_marshes*)
+      5) Minimum distance from either Matalascañas or El Rocío (*dist_urban*)
+
+
+Below (hidden), it is the code for running each of these models, checking the diagnostics (using the _simulateResiduals()_ function of the *DHARMa* library), and preparing the data for the AIC table.
+
+```{r results='hide', fig.keep='none', message=FALSE}
+# Remove the human/dogs detections
+dogs <- all_data %>%
+  mutate(presence = factor(if_else(cam %in% c("77", "55"), "no", presence)))
+
+# Fit a binomial GLM model for minimum distance to El Rocio
+dist_rocio <- glm(presence ~ dist_rocio, data = dogs, binomial)
+simulateResiduals(dist_rocio, plot = TRUE) # Simulate residuals from the model and generate a plot
+summary(dist_rocio) # Display a summary of the model
+
+# Fit a binomial GLM model for minimum distance to Matalascañas
+dist_mata <- glm(presence ~ dist_mata, data = dogs, binomial)
+simulateResiduals(dist_mata, plot = T) # Simulate residuals from the model and generate a plot
+summary(dist_mata) # Display a summary of the model
+
+# Fit a binomial GLM model for minimum distance to Matalascañas or El Rocio
+dist_urban <- glm(presence ~ dist_urban, data = dogs, binomial)
+simulateResiduals(dist_urban, plot = TRUE) # Simulate residuals from the model and generate a plot
+summary(dist_urban) # Display a summary of the model
+
+# Fit a binomial GLM model for minimum distance to the Marshes
+dist_marshes <- glm(presence ~ dist_marshes, data = dogs, binomial)
+simulateResiduals(dist_marshes, plot = T) # Simulate residuals from the model and generate a plot
+summary(dist_marshes) # Display a summary of the model
+
+# Fit a binomial GLM model for minimum distance to the nearest paved road
+dist_road <- glm(presence ~ dist_road, data = dogs, binomial)
+simulateResiduals(dist_road, plot = TRUE) # Simulate residuals from the model and generate a plot
+summary(dist_road) # Display a summary of the model
+
+# Set of candidate models
+model_list <- list(
+  dist_rocio = dist_rocio,
+  dist_mata = dist_mata,
+  dist_urban = dist_urban,
+  dist_marshes = dist_marshes,
+  dist_road = dist_road
+)
+
+# Calculate AICc value for each model
+aic_tab <- aictab(model_list)
+
+# Convert the AICc table into a dataframe
+aic_tab <- as.data.frame(aic_tab)
+
+# Calculate deviance values for each model
+deviance_values <- sapply(model_list, deviance)
+
+# Add deviance values to the model comparison table
+aic_tab$Deviance <- deviance_values
+
+```
+This is the AICc table with the set of candidate models supporing the hypothesis the probability of dogs' detection relates to the distance from El Rocío. 
+The name of each model represents the distance from different places ( _rocio_ El Rocío, _mata_ Matalascañas, _road_ the road, _urban_ the closest village: El Rocío or Matalascañas, _marshes_ mashes).
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Print aic_tab
+kable(aic_tab, format = "html", caption = "Table 1 - Model selection for the generalised linear model analysis of dog presence depending on one of the predictors described above") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = FALSE, position = "center")
+```
+## Distance from El Rocío 
+
+We found that dog detection probability increased with proximity to the El Rocío village (β = -0.22, P < 0.01; Figure 1). The predicted probability of detecting a dog in one of our camera traps during the study period was notably high, reaching 0.78 or higher when the distance from El Rocío was less than five km (the farthest point in the PA is approximately 40 km away from this village).
+
+```{r fig.cap="Figure 1. Change in the probability of dog detection in relation to the distance to El Rocío, a traditional village neighbouring Doñana National Park. The dark line represents the mean probability, and the shaded bands indicate the 95% confidence intervals."}
+# Create a dataset with dist_rocio values
+dist_values <- seq(min(dogs$dist_rocio), max(dogs$dist_rocio), length.out = 100)
+
+# Predict probabilities and confidence intervals using the model
+predicted <- predict(dist_rocio, newdata = data.frame(
+  dist_rocio = dist_values
+), type = "link", se.fit = TRUE)
+
+# Transform predictions from log-odds to probabilities
+predicted_probs <- plogis(predicted$fit)
+
+# Create a dataframe with distance values, predicted probabilities, and confidence intervals
+data_for_plot <- data.frame(
+  dist_rocio = dist_values,
+  P_dog = predicted_probs,
+  Lower_CI = plogis(
+    predicted$fit - 1.96 * predicted$se.fit
+  ),  # Lower limit of confidence interval
+  Upper_CI = plogis(
+    predicted$fit + 1.96 * predicted$se.fit
+  )  # Upper limit of confidence interval
+)
+
+# Create the plot
+detection_plot <- ggplot(data_for_plot, 
+                         aes(x = dist_rocio, 
+                             y = P_dog)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, 
+                  ymax = Upper_CI),
+              fill = "blue", 
+              alpha = 0.2) +
+  labs(x = "Distance to the traditional village El Rocío (km)",
+       y = "Probability of dog detection") +
+  theme(axis.text = element_text(family = "serif", 
+                                 size = 13),
+        axis.title = element_text(family = "serif", 
+                                  size = 16),
+        axis.line = element_line(colour = "Black"),
+        panel.background = element_rect(fill = "white"))
+
+detection_plot
+```
+## Temporal variation 
+
+The temporal distribution of dogs' detection events was quite irregular over the study period (**Figure 2**). The highest number of detections was recorded in 2022 winter after the increasing in the number of cameras (from 35 to 60) occurred in june 2022.
+
+```{r fig.cap="Figure 2. Temporal distribution of dogs' detection events in Doñana National Park."}
+
+# Time as a posixct object
+all_data$date_time <- as.POSIXct(all_data$date_time, format = "%d/%m/%Y %H:%M", tz = "UTC")
+
+# Take the rows with dogs presence
+presence_dogs <- all_data[all_data$presence == "yes",]
+
+# This is to see the variation of the records over time
+presence_dogs$months_since_start <- as.numeric(difftime(presence_dogs$date_time, as.POSIXct("2020-10-01"), units = "days")) / (365.25 / 12)
+
+# Filter out missing or infinite values in 'months_since_start'
+filtered_dogs <- presence_dogs[is.finite(presence_dogs$months_since_start),]
+
+# Convert the maximum date to a "Date" object
+max_date <- as.Date(max(filtered_dogs$date_time))
+
+# Create an empty data frame for custom axis labels
+axis_labels <- data.frame(
+  months_since_start = seq(0, max(filtered_dogs$months_since_start), by = 2),
+  custom_labels = format(seq(as.Date("2020-10-01"), max_date, by = "2 months"), "%b-%Y")
+)
+
+# Create a histogram of 'months_since_start' and use custom axis labels
+ggplot(filtered_dogs, aes(x = months_since_start)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black", alpha = 0.6) +
+  scale_x_continuous(
+    breaks = axis_labels$months_since_start,
+    labels = axis_labels$custom_labels,
+    name = "Time"
+  ) +
+  labs(y = "Number of dogs' detection events")+
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    axis.title.x = element_text(vjust = -5),  # Adjust the vjust value as needed
+    plot.margin = margin(b = 50)
+  )
+```
+## Controlled temporal variation
+
+As the total number of active cameras was not the same throughout the study period, we controlled the number of dog detections according to the period of camera activity. 
+
+```{r fig.cap="Figure 3. Temporal distribution of frequency dogs’ detection events over the study period."}
+# Step 1: Generate a sequence of dates representing each month in the study period
+study_period <- seq(as.Date("2020-10-01"), as.Date("2024-01-19"), by = "1 month")
+ 
+# Step 2: Count the number of records in dogs1$date_time that fall within each month
+event_counts <- presence_dogs %>%
+mutate(month_year = format(as.Date(date_time), "%Y-%m")) %>%
+group_by(month_year) %>%
+summarize(event_freq = n())
+ 
+# Step 3: Create a dataset with the month and the corresponding count
+final_dataset <- data.frame(date_time = study_period)
+ 
+# Modify the format of date_time to match month_year
+final_dataset$month_year <- format(final_dataset$date_time, "%Y-%m")
+ 
+# Left join event_counts and update event_freq to 0 if there are NA values
+final_dataset <- merge(final_dataset,event_counts, by.x = "month_year", by.y = "month_year", all.x = TRUE, all.y = TRUE)
+final_dataset[is.na(final_dataset)] <- 0
+ 
+final_dataset <- final_dataset %>%
+  mutate(
+    event_freq = ifelse(event_freq == 0, 0,
+                        ifelse(date_time < as.Date("2022-06-10"), event_freq/35, event_freq/60))
+) 
+
+# Adding a variable which is the number of months elapsed from the start of the study period
+final_dataset$months_since_start<- 1:nrow(final_dataset)
+
+# And now a simple bar graph showing the temporal variation in the number of detections controlling for the number of available cameras
+ggplot(final_dataset, aes(x = months_since_start, y = event_freq)) +
+  geom_bar(stat = "identity", fill = "red", color = "black", alpha = 0.6) +
+  labs(x = "Months Since Start", y = "Event Frequency") +
+  scale_x_continuous(
+    breaks = axis_labels$months_since_start,
+    labels = axis_labels$custom_labels,
+    name = "Time"
+  ) +
+  labs(y = "Frequency of dogs' detection events")+
+ theme_classic()+
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    axis.title.x = element_text(vjust = -5),  # Adjust the vjust value as needed
+    plot.margin = margin(b = 50)
+ )
+```
+
+## Activity pattern
+
+We want to investigate the diel activity pattern of dogs presents in Doñana National Park. As the daylight hours vary considerably throughout the year in the study area, we applied a double anchor transformation to our detections, thus to link the activity to average sunrise and sunset times. We plot the activity using nonparametric kernel density plots.
+
+
+```{r fig.cap="Figure 4. Diel activity pattern (density estimates of the daily activity patterns) of domestic dogs within Doñana National Park, as inferred from camera traps. The activity pattern is presented in average anchored time. The light grey zones indicate the range of sunrise and sunset variation across the year, while the white and dark grey zones indicate the daylight and the night periods, respectively."}
+# Apply the double-anchor transformation to average sunrise and sunset times
+activity_dogs <- solartime(presence_dogs$date_time, 
+                            lat = 36.96693,
+                            lon = -6.46713,
+                            tz = 1,
+                            format = "%Y-%m-%d %H:%M:%S")
+
+# Take the radian solar time data anchored to average sun rise and sun set times
+activity_dogs <- presence_dogs %>%
+  mutate(solar = activity_dogs$solar)
+
+# Fit circular kernel density to average-anchored times
+fit_canis <- fitact(activity_dogs$solar, sample = "data")
+
+# Create the x axis for an activity centered at day
+hours_in_radians_day <- c(0, 3, 6, 9, 12, 15, 18, 21, 24) * (pi / 12)
+draw_day_xaxis <- function () {
+  axis(1, at = hours_in_radians_day, 
+       labels =c("0", "3:00","6:00","9:00", "12:00", "15:00","18:00", "21:00","24:00"), 
+       tick = TRUE, 
+       las=1)
+}
+
+# Extract the minimum and maximum times of sunrise and sunset for represent the night length
+max_sunrise <-max(activity_dogs$time_sunrise[activity_dogs$season =="summer" | 
+                                                activity_dogs$season =="autumn"])
+min_sunrise <-min(activity_dogs$time_sunrise[activity_dogs$season =="summer" | 
+                                                activity_dogs$season =="autumn"])
+max_sunset<-max(activity_dogs$time_sunset[activity_dogs$season =="summer" | 
+                                             activity_dogs$season =="autumn"])
+min_sunset<-min(activity_dogs$time_sunset[activity_dogs$season =="summer" | 
+                                             activity_dogs$season =="autumn"])
+
+# Create a function to draw polygons representing the variation of daylight hours throughout the year
+
+draw_day_polygons <- function() {
+  polygon(x = c(0,max_sunrise, max_sunrise,0), 
+          y = c(0,0,10,10), 
+          col = rgb(0.3, 0.3, 0.3, 0.3), 
+          border = NA)
+  polygon(x = c(0,min_sunrise, min_sunrise,0),
+          y = c(0,0,10,10),
+          col = rgb(0.3, 0.3, 0.3, 0.3), 
+          border = NA)
+  polygon(x = c(min_sunset, (2*pi),(2*pi), min_sunset),
+          y = c(0,0,10,10), 
+          col = rgb(0.3, 0.3, 0.3, 0.3),
+          border = NA)
+  polygon(x = c(max_sunset, (2*pi),(2*pi), 
+                max_sunset), 
+          y = c(0,0,10,10),
+          col = rgb(0.3, 0.3, 0.3, 0.3),
+          border=NA)
+  box()
+}
+
+# Create the plot
+plot(fit_canis, centre = "day", add = FALSE, xunit="radians", yunit="density", 
+     ylim=c(0,0.6), ylab="Density of activity", xlab="Time of day", 
+     tline = list(col = "#37DB04", lwd = 3),
+     dline = list(col = "transparent"),
+     cline = list(col = "transparent"),
+     xaxis=list(xaxt="n"))
+
+# Plot the x axis centered at day
+draw_day_xaxis()
+
+# Plot the boxes
+draw_day_polygons()
+
+# Plot the legend
+legend("top", c("Canis lupus"), col = c("#37DB04"), 
+       box.col = "transparent", bg = "transparent", cex = 1.2, lty = 1)
+```
+
